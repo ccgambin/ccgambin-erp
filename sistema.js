@@ -22,7 +22,7 @@
     "configuracoes.js",
     "sistema.js",
     "router.js",
-    "js/app.js"
+    "app.js"
   ];
 
   /* ---------- ZIP (método "store", sem compressão) ---------- */
