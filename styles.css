@@ -1,0 +1,128 @@
+:root{
+  --bg:#f1f5f9; --fg:#131c31; --card:#fff; --muted:#64748b;
+  --primary:#2563eb; --primary-fg:#fff; --border:#cbd5e1; --grid:#d7dfea;
+  --sidebar:#111c34; --sidebar-fg:#f1f5f9; --sidebar-accent:#1e2c4d;
+  --success:#16a34a; --danger:#dc2626; --warning:#d97706; --radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Inter,system-ui,sans-serif;background:var(--bg);color:var(--fg)}
+a{text-decoration:none;color:inherit}
+.btn{border:0;border-radius:var(--radius);background:var(--primary);color:var(--primary-fg);
+  padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit}
+.btn:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--border)}
+.btn.danger{background:var(--danger)}
+.btn.ok{background:var(--success)}
+.btn.sm{padding:5px 10px;font-size:12px}
+input,select,textarea{width:100%;padding:9px 11px;border:1px solid var(--border);border-radius:var(--radius);
+  font-size:14px;font-family:inherit;background:#fff;color:var(--fg)}
+input:focus,select:focus{outline:2px solid var(--primary);outline-offset:1px}
+label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px}
+.field{margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;margin-bottom:18px}
+.card h2{font-size:15px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--grid);color:var(--fg)}
+/* ---- Cards de conteúdo neutros: somente os cards principais (.stat) são coloridos ---- */
+/* ---- Paginação ---- */
+.pager{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;padding-top:12px;
+  border-top:1px solid var(--grid)}
+.pager .info{font-size:12px;color:var(--muted);font-weight:600;margin-right:auto}
+.pager button{padding:7px 12px;border-radius:9px;border:1px solid var(--border);background:#fff;
+  font-size:12px;font-weight:700;color:#1e293b;cursor:pointer}
+.pager button:hover:not(:disabled){background:#eef6ff;border-color:var(--primary);color:#1e40af}
+.pager button:disabled{opacity:.45;cursor:not-allowed}
+.pager .atual{background:var(--primary);border-color:var(--primary);color:#fff}
+
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.g4{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+
+/* ---- Formulário com linhas horizontais e verticais (grade) ---- */
+.grid.linhas{gap:0;border:1px solid var(--grid);border-radius:12px;overflow:hidden;background:#fff}
+.grid.linhas > .field{margin:0;padding:12px 14px;border-right:1px solid var(--grid);border-bottom:1px solid var(--grid)}
+
+/* ---- Cards de indicadores coloridos ---- */
+.stat{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;
+  border-left:6px solid var(--primary);position:relative;overflow:hidden}
+.stat .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.stat .val{font-size:23px;font-weight:800;margin-top:6px}
+.stat.c1{background:linear-gradient(135deg,#eff6ff,#dbeafe);border-left-color:#2563eb}
+.stat.c1 .val{color:#1e40af}
+.stat.c2{background:linear-gradient(135deg,#ecfdf5,#d1fae5);border-left-color:#059669}
+.stat.c2 .val{color:#065f46}
+.stat.c3{background:linear-gradient(135deg,#fffbeb,#fef3c7);border-left-color:#d97706}
+.stat.c3 .val{color:#92400e}
+.stat.c4{background:linear-gradient(135deg,#fef2f2,#fee2e2);border-left-color:#dc2626}
+.stat.c4 .val{color:#991b1b}
+.stat.c5{background:linear-gradient(135deg,#f5f3ff,#ede9fe);border-left-color:#7c3aed}
+.stat.c5 .val{color:#5b21b6}
+.stat.c6{background:linear-gradient(135deg,#ecfeff,#cffafe);border-left-color:#0891b2}
+.stat.c6 .val{color:#155e75}
+.stat .lbl{opacity:.9}
+
+/* ---- Tabelas com linhas horizontais E verticais ---- */
+table{width:100%;border-collapse:collapse;font-size:13px;border:1px solid var(--grid)}
+th{ text-align:left;padding:10px;background:#eef2f7;color:#334155;font-size:11px;
+  text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid var(--grid);border-right:1px solid var(--grid)}
+td{padding:10px;border-bottom:1px solid var(--grid);border-right:1px solid var(--grid)}
+th:last-child,td:last-child{border-right:0}
+tbody tr:nth-child(even){background:#f9fbfd}
+tbody tr:hover{background:#eef6ff}
+.tablewrap{overflow-x:auto;border-radius:12px;border:1px solid var(--grid)}
+.tablewrap table{border:0}
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700}
+.badge.ok{background:#dcfce7;color:#166534}.badge.warn{background:#fef3c7;color:#92400e}
+.badge.bad{background:#fee2e2;color:#991b1b}.badge.info{background:#dbeafe;color:#1e40af}
+.page-title{font-size:22px;font-weight:800;margin-bottom:4px}
+.page-sub{font-size:13px;color:var(--muted);margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--grid)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.right{margin-left:auto}
+.sidebar{position:fixed;inset:0 auto 0 0;width:250px;background:var(--sidebar);color:var(--sidebar-fg);
+  padding:18px;overflow-y:auto;z-index:40;transition:transform .2s;border-right:1px solid rgba(0,0,0,.3)}
+.sidebar .logo{text-align:center;font-size:21px;font-weight:800;margin-bottom:22px;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,.15)}
+.sidebar .logo span{color:#60a5fa}
+.sidebar a,.sidebar button.nav{display:block;width:100%;text-align:left;border:0;background:transparent;
+  color:#cbd5e1;font:inherit;font-size:13px;font-weight:600;padding:9px 12px;border-radius:9px;cursor:pointer;
+  border-bottom:1px solid rgba(255,255,255,.07)}
+.sidebar a:hover,.sidebar button.nav:hover{background:var(--sidebar-accent);color:#fff}
+.sidebar a.active{background:var(--primary);color:#fff}
+.sidebar button.sair{color:#f87171;margin-top:12px}
+.content{margin-left:250px;padding:26px}
+.topbar{display:none;align-items:center;gap:10px;background:#fff;border-bottom:1px solid var(--border);padding:12px 16px}
+.overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:30}
+footer{text-align:center;font-size:12px;color:var(--muted);padding:20px;border-top:1px solid var(--grid)}
+.login{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--sidebar);padding:16px}
+.login form{background:#fff;padding:34px;border-radius:16px;width:100%;max-width:360px;box-shadow:0 20px 40px rgba(0,0,0,.35)}
+.login h1{text-align:center;font-size:23px;font-weight:800}
+.login h1 span{color:var(--primary)}
+.login .sub{text-align:center;font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);margin:4px 0 22px}
+.erro{color:var(--danger);font-size:13px;text-align:center;margin-top:12px}
+.hint{text-align:center;font-size:12px;color:var(--muted);margin-top:18px}
+@media(max-width:1023px){
+  .sidebar{transform:translateX(-100%)} .sidebar.open{transform:none}
+  .content{margin-left:0;padding:16px} .topbar{display:flex}
+  .grid.linhas > .field{border-right:0}
+}
+
+/* Campo monetário e mensagens auxiliares */
+.money{position:relative}
+.money input{padding-left:34px;text-align:right;font-variant-numeric:tabular-nums}
+.money::before{content:"R$";position:absolute;left:11px;top:50%;transform:translateY(-50%);
+  font-size:13px;font-weight:700;color:var(--muted);pointer-events:none}
+.aviso{font-size:13px;color:var(--primary);font-weight:600;margin:0 0 12px}
+.ok-msg{font-size:13px;color:var(--success);font-weight:600;margin:0 0 12px}
+
+/* Painel de resumo de comissão */
+.resumo{display:grid;gap:0;border:1px solid var(--grid);border-radius:12px;overflow:hidden;margin:14px 0;
+  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));background:#fff}
+.resumo div{padding:12px 14px;border-right:1px solid var(--grid);border-bottom:1px solid var(--grid)}
+.resumo .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700}
+.resumo .v{font-size:18px;font-weight:800;margin-top:4px}
+.resumo div.destaque{background:#ecfdf5}
+.resumo div.destaque .v{color:#065f46}
+
+/* Status da nuvem (Firebase) */
+.cloud{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;
+  padding:4px 10px;border-radius:999px;background:#e2e8f0;color:#334155}
+.cloud.on{background:#dcfce7;color:#166534}
+.cloud.off{background:#fee2e2;color:#991b1b}
