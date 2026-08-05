@@ -32,7 +32,7 @@
       '<aside class="sidebar" id="sidebar"><div class="logo">C.C <span>GAMBIN</span></div><nav id="nav"></nav></aside>' +
       '<div id="overlay"></div>' +
       '<div><header class="topbar"><button class="btn ghost" id="abrir">☰</button><strong>C.C GAMBIN ERP</strong></header>' +
-      '<main class="content" id="view"></main><footer>' + UI.esc(cfg.empresa) + " ERP v1.3 — dados locais + Firebase</footer></div>";
+      '<main class="content" id="view"></main><footer>' + UI.esc(cfg.empresa) + " ERP v1.4 — dados locais + Firebase</footer></div>";
     el.querySelector("#abrir").addEventListener("click", function () {
       document.getElementById("sidebar").classList.add("open");
       document.getElementById("overlay").className = "overlay";
