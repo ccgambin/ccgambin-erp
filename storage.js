@@ -23,12 +23,14 @@
     novoId: novoId,
     onChange: function (cb) { listeners.push(cb); },
     insert: function (col, row) {
-      var full = Object.assign({}, row, { id: row.id || novoId() });
+      var full = Object.assign({}, row, { id: row.id || novoId(), _at: Date.now() });
       write(col, read(col).concat([full]));
       return full;
     },
     update: function (col, id, patch) {
-      write(col, read(col).map(function (r) { return r.id === id ? Object.assign({}, r, patch) : r; }));
+      write(col, read(col).map(function (r) {
+        return r.id === id ? Object.assign({}, r, patch, { _at: Date.now() }) : r;
+      }));
     },
     remove: function (col, id) {
       write(col, read(col).filter(function (r) { return r.id !== id; }));

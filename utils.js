@@ -105,7 +105,8 @@
         if (!j || j.erro || !j.localidade) throw new Error("nao encontrado");
         return {
           endereco: j.logradouro || "", bairro: j.bairro || "",
-          cidade: j.localidade || "", uf: j.uf || "", complemento: j.complemento || ""
+          cidade: j.localidade || "", uf: j.uf || "", complemento: j.complemento || "",
+          ibge: j.ibge || ""
         };
       });
   }
@@ -116,7 +117,7 @@
         if (!j || !j.city) throw new Error("nao encontrado");
         return {
           endereco: j.street || "", bairro: j.neighborhood || "",
-          cidade: j.city || "", uf: j.state || "", complemento: ""
+          cidade: j.city || "", uf: j.state || "", complemento: "", ibge: (j.city_ibge || "")
         };
       });
   }
@@ -127,7 +128,7 @@
         if (!j || !j.localidade) throw new Error("nao encontrado");
         return {
           endereco: j.logradouro || "", bairro: j.bairro || "",
-          cidade: j.localidade || "", uf: j.uf || "", complemento: ""
+          cidade: j.localidade || "", uf: j.uf || "", complemento: "", ibge: j.ibge || ""
         };
       });
   }

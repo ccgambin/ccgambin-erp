@@ -41,6 +41,26 @@
         UI.campo("Estoque", UI.input("estoque", { type: "number", step: "0.01", value: e.estoque })) +
         UI.campo("Estoque mínimo", UI.input("minimo", { type: "number", step: "0.01", value: e.minimo })) +
       '</div>' +
+      '<h2 style="margin-top:18px">Dados fiscais (usados na emissão da NF-e)</h2>' +
+      '<div class="grid g4 linhas">' +
+        UI.campo("NCM", UI.input("ncm", { value: e.ncm, maxlength: 8, placeholder: "00000000" })) +
+        UI.campo("CEST", UI.input("cest", { value: e.cest, maxlength: 7, placeholder: "Opcional (ST)" })) +
+        UI.campo("GTIN/EAN", UI.input("gtin", { value: e.gtin, placeholder: "SEM GTIN" })) +
+        UI.campo("Origem da mercadoria", UI.select("origem", [
+          { valor: "0", label: "0 - Nacional" }, { valor: "1", label: "1 - Importação direta" },
+          { valor: "2", label: "2 - Adquirida no mercado interno" },
+          { valor: "3", label: "3 - Nacional > 40% importado" },
+          { valor: "8", label: "8 - Nacional, importação < 40%" }], e.origem || "0")) +
+        UI.campo("CFOP dentro do estado", UI.input("cfop", { value: e.cfop || "5102", maxlength: 4 })) +
+        UI.campo("CFOP fora do estado", UI.input("cfopFora", { value: e.cfopFora || "6102", maxlength: 4 })) +
+        UI.campo("CSOSN / CST ICMS", UI.select("csosn", ["102", "101", "103", "300", "400", "500", "900"], e.csosn || "102")) +
+        UI.campo("Alíquota ICMS (%)", UI.input("aliqIcms", { type: "number", step: "0.01", value: e.aliqIcms || "0" })) +
+        UI.campo("CST PIS", UI.select("cstPis", ["07", "01", "04", "06", "49"], e.cstPis || "07")) +
+        UI.campo("Alíquota PIS (%)", UI.input("aliqPis", { type: "number", step: "0.01", value: e.aliqPis || "0" })) +
+        UI.campo("CST COFINS", UI.select("cstCofins", ["07", "01", "04", "06", "49"], e.cstCofins || "07")) +
+        UI.campo("Alíquota COFINS (%)", UI.input("aliqCofins", { type: "number", step: "0.01", value: e.aliqCofins || "0" })) +
+      '</div>' +
+      '<p class="hint" style="text-align:left;margin:10px 0 8px">Os dados fiscais são gravados junto com o produto: ao emitir uma nota, NCM, CFOP, CSOSN, origem, CEST e alíquotas são preenchidos automaticamente.</p>' +
       '<p class="hint" style="text-align:left;margin:10px 0 8px">Selecione o fornecedor: nome, CNPJ e cidade são buscados automaticamente do cadastro de Fornecedores.</p>' +
       UI.acoes(estado.editando) + "</form></div>" +
       '<div class="card"><div class="row" style="margin-bottom:12px">' +
@@ -51,6 +71,8 @@
         { label: "Código", chave: "codigo" },
         { label: "Descrição", chave: "descricao" },
         { label: "Categoria", chave: "categoria" },
+        { label: "NCM", render: function (p) { return p.ncm ? UI.esc(p.ncm) : UI.badge("SEM NCM", "warn"); } },
+        { label: "CFOP", chave: "cfop" },
         { label: "Fornecedor", chave: "fornecedor" },
         { label: "Un", chave: "unidade" },
         { label: "Custo", render: function (p) { return Utils.moeda(p.custo); } },
@@ -79,6 +101,11 @@
       ["custo", "venda", "estoque", "minimo"].forEach(function (k) { d[k] = Utils.numero(d[k]); });
       if (!d.codigo || !d.descricao) { alert("Informe código e descrição do produto."); return; }
       if (!d.fornecedorId) { alert("Selecione o fornecedor. Cadastre-o antes no módulo Fornecedores."); return; }
+      d.ncm = Utils.soDigitos(d.ncm);
+      d.cest = Utils.soDigitos(d.cest);
+      if (d.ncm.length !== 8) { alert("Informe o NCM do produto com 8 dígitos (obrigatório para emitir a NF-e)."); return; }
+      if (Utils.soDigitos(d.cfop).length !== 4) { alert("Informe o CFOP dentro do estado (4 dígitos)."); return; }
+      ["aliqIcms", "aliqPis", "aliqCofins"].forEach(function (k) { d[k] = Utils.numero(d[k]); });
       d.status = "ATIVO";
       if (estado.editando) { DB.update("produtos", estado.editando.id, d); estado.editando = null; }
       else DB.insert("produtos", d);
@@ -95,7 +122,9 @@
         { label: "Unidade", chave: "unidade" },
         { label: "Custo", valor: function (p) { return Utils.moeda(p.custo); } },
         { label: "Venda", valor: function (p) { return Utils.moeda(p.venda); } },
-        { label: "Estoque", chave: "estoque" }, { label: "Mínimo", chave: "minimo" }
+        { label: "Estoque", chave: "estoque" }, { label: "Mínimo", chave: "minimo" },
+        { label: "NCM", chave: "ncm" }, { label: "CFOP", chave: "cfop" },
+        { label: "CSOSN", chave: "csosn" }, { label: "Origem", chave: "origem" }
       ], lista);
     });
     el.addEventListener("click", function (ev) {

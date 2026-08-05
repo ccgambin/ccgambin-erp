@@ -2,6 +2,7 @@
 (function (w) {
   var MENU = [
     { rota: "dashboard", label: "Dashboard", icone: "🏠" },
+    { rota: "clientes", label: "Clientes (NF-e)", icone: "🧾" },
     { rota: "produtos", label: "Produtos", icone: "📦" },
     { rota: "estoque", label: "Estoque", icone: "📊" },
     { rota: "entrada", label: "Entrada Mercadorias", icone: "📥" },

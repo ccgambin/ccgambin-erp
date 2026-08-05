@@ -16,7 +16,7 @@
     appId: "1:131408194544:web:dfa775bb96e2619dd8cb35"
   };
 
-  var COLECOES = ["produtos", "clientes", "fornecedores", "movimentos", "compras", "vendas",
+  var COLECOES = ["produtos", "clientes", "clientesnf", "fornecedores", "movimentos", "compras", "vendas",
     "caixa", "contaspagar", "contasreceber", "usuarios", "notas", "certificados", "config"];
 
   var SDK = [
@@ -40,7 +40,10 @@
     var c = config();
     return !!(c.apiKey && c.projectId && c.appId);
   }
-  function autoConectar() { return localStorage.getItem("ccgambin:firebase:auto") === "1"; }
+  /* Sincronização automática LIGADA por padrão: qualquer usuário, em qualquer
+     lugar, abre o sistema já com os dados da nuvem. Só fica desligada se o
+     usuário desligar manualmente em Configurações. */
+  function autoConectar() { return localStorage.getItem("ccgambin:firebase:auto") !== "0"; }
   function definirAuto(v) { localStorage.setItem("ccgambin:firebase:auto", v ? "1" : "0"); }
 
   function carregarScript(src) {
@@ -58,6 +61,7 @@
   }
 
   var db = null;
+  var ligadoOnChange = false;
 
   function enviar(colecao) {
     if (!db || estado.aplicando) return;
@@ -73,6 +77,45 @@
   }
 
   function enviarTudo() { COLECOES.forEach(enviar); }
+
+  /* Mescla local + nuvem por id, mantendo sempre o registro alterado mais
+     recentemente (_at). Evita que o primeiro acesso de um computador novo
+     apague os dados já existentes na nuvem. */
+  function mesclar(locais, remotos) {
+    var mapa = {}, ordem = [];
+    function por(rows) {
+      (rows || []).forEach(function (r) {
+        if (!r || !r.id) return;
+        var atual = mapa[r.id];
+        if (!atual) { mapa[r.id] = r; ordem.push(r.id); return; }
+        if ((r._at || 0) >= (atual._at || 0)) mapa[r.id] = r;
+      });
+    }
+    por(remotos);
+    por(locais);
+    return ordem.map(function (id) { return mapa[id]; });
+  }
+
+  /* Primeira sincronização: baixa tudo, mescla e devolve a base unificada */
+  function sincronizacaoInicial() {
+    return Promise.all(COLECOES.map(function (colecao) {
+      return db.collection("erp").doc(colecao).get().then(function (doc) {
+        var remotos = doc.exists ? ((doc.data() || {}).rows || []) : [];
+        var locais = DB.read(colecao);
+        var unido = mesclar(locais, remotos);
+        if (JSON.stringify(unido) !== JSON.stringify(locais)) {
+          estado.aplicando = true;
+          DB.write(colecao, unido);
+          estado.aplicando = false;
+        }
+        return { colecao: colecao, mudou: JSON.stringify(unido) !== JSON.stringify(remotos) };
+      }).catch(function () { return { colecao: colecao, mudou: true }; });
+    })).then(function (res) {
+      res.filter(function (r) { return r.mudou; }).forEach(function (r) { enviar(r.colecao); });
+      estado.ultimoSync = new Date().toISOString();
+      notificar();
+    });
+  }
 
   function escutar() {
     COLECOES.forEach(function (colecao) {
@@ -103,11 +146,16 @@
       estado.status = "conectado";
       definirAuto(true);
       notificar();
-      escutar();
-      enviarTudo();
-      /* Toda gravação local é replicada na nuvem */
-      DB.onChange(function () { if (estado.ligado) enviarTudo(); });
-      return true;
+      /* 1) mescla local + nuvem  2) passa a ouvir  3) replica gravações */
+      return sincronizacaoInicial().then(function () {
+        escutar();
+        if (!ligadoOnChange) {
+          ligadoOnChange = true;
+          DB.onChange(function () { if (estado.ligado) enviarTudo(); });
+        }
+        if (w.Router && Router.refresh) Router.refresh();
+        return true;
+      });
     }).catch(function (e) {
       estado.status = "erro"; estado.erro = e.message; estado.ligado = false; notificar();
       throw e;

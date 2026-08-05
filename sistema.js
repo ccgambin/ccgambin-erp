@@ -13,7 +13,7 @@
     "usuarios.js",
     "login.js",
     "dashboard.js",
-    "produtos.js",
+    "clientes.js", "forge.min.js", "produtos.js",
     "estoque.js",
     "movimentacao.js",
     "pessoas.js",

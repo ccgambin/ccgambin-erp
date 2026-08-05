@@ -37,9 +37,10 @@
 
   w.Modulos.notas = function (el) {
     var cert = Certificados.ativo();
+    if (estado.clientePre) { estado.cab = Object.assign({}, estado.cab, { clienteId: estado.clientePre }); estado.clientePre = null; }
     var cab = estado.cab || {};
     var em = emitenteConfig();
-    var clientes = DB.read("clientes");
+    var clientes = DB.read("clientesnf");
     var produtos = DB.read("produtos");
     var todas = notas();
     var f = estado.filtros || {};
@@ -172,6 +173,13 @@
       var p = produtos.filter(function (x) { return x.id === selProd.value; })[0];
       if (!p) return;
       if (p.ncm) el.querySelector("#itemNcm").value = Fiscal.digitos(p.ncm);
+      /* CFOP conforme a UF do destinatário: dentro do estado x fora do estado */
+      var cli = DB.read("clientesnf").filter(function (c) { return c.id === (estado.cab || {}).clienteId; })[0];
+      var emit = (DB.read("config")[0] || {});
+      var fora = cli && cli.uf && emit.uf && String(cli.uf).toUpperCase() !== String(emit.uf).toUpperCase();
+      var cfop = fora ? (p.cfopFora || "6102") : (p.cfop || "5102");
+      el.querySelector("#itemCfop").value = Fiscal.digitos(cfop) || "5102";
+      if (p.csosn) el.querySelector("[name=itemCsosn]").value = p.csosn;
       el.querySelector("#itemValor").value = Utils.moedaTexto(p.venda);
     });
 
@@ -196,7 +204,10 @@
         uid: DB.novoId(), produtoId: p.id, codigo: p.codigo, descricao: p.descricao,
         unidade: p.unidade || "UN", ncm: Fiscal.digitos(form.elements["itemNcm"].value) || "00000000",
         cfop: Fiscal.digitos(form.elements["itemCfop"].value) || "5102",
-        csosn: form.elements["itemCsosn"].value, quantidade: qtd, valorUnitario: valor
+        csosn: form.elements["itemCsosn"].value, quantidade: qtd, valorUnitario: valor,
+        cest: Fiscal.digitos(p.cest || ""), origem: p.origem || "0", gtin: p.gtin || "",
+        aliqIcms: Utils.numero(p.aliqIcms), cstPis: p.cstPis || "07", aliqPis: Utils.numero(p.aliqPis),
+        cstCofins: p.cstCofins || "07", aliqCofins: Utils.numero(p.aliqCofins)
       }]);
       Router.refresh();
     });
@@ -405,5 +416,6 @@
     jan.print();
   }
 
+  w.Notas = { emitirPara: function (clienteId) { estado.clientePre = clienteId; } };
   w.NotasFiscais = { total: totalNota, xml: xmlDaNota };
 })(window);
