@@ -8,12 +8,12 @@
  */
 (function (w) {
   var CONFIG_PADRAO = {
-    apiKey: "",
-    authDomain: "",
-    projectId: "",
-    storageBucket: "",
-    messagingSenderId: "",
-    appId: ""
+    apiKey: "AIzaSyBPihoSOC7FCHt-WzCQKjruKty8koGfJjk",
+    authDomain: "ccgambin-erp.firebaseapp.com",
+    projectId: "ccgambin-erp",
+    storageBucket: "ccgambin-erp.firebasestorage.app",
+    messagingSenderId: "131408194544",
+    appId: "1:131408194544:web:dfa775bb96e2619dd8cb35"
   };
 
   var COLECOES = ["produtos", "clientes", "fornecedores", "movimentos", "compras", "vendas",
