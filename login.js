@@ -11,7 +11,7 @@
       Auth.garantirAdmin();
       el.innerHTML =
         '<div class="login"><form id="frmLogin">' +
-        '<h1>C.C <span>GAMBIN</span></h1><p class="sub">ERP v1.4</p>' +
+        '<h1>C.C <span>GAMBIN</span></h1><p class="sub">ERP v1.6</p>' +
         '<div class="field"><input name="usuario" placeholder="Usuário" autocomplete="username" /></div>' +
         '<div class="field"><input name="senha" type="password" placeholder="Senha" autocomplete="current-password" /></div>' +
         '<button class="btn" style="width:100%">ENTRAR</button>' +

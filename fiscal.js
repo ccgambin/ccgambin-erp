@@ -39,19 +39,6 @@
     var n = w.Utils ? Utils.numero(v) : Number(v) || 0;
     return n.toFixed(casas == null ? 2 : casas);
   }
-  /* Data/hora no formato exigido pela SEFAZ: AAAA-MM-DDThh:mm:ss-03:00.
-     O toISOString() devolve "...Z" (UTC) e a SEFAZ rejeita (dhEmi invalido). */
-  function dataHoraSefaz(d) {
-    d = d || new Date();
-    function p2(n) { return (n < 10 ? "0" : "") + n; }
-    var off = -d.getTimezoneOffset();
-    var sinal = off >= 0 ? "+" : "-";
-    off = Math.abs(off);
-    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) + "T" +
-      p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" + p2(d.getSeconds()) +
-      sinal + p2(Math.floor(off / 60)) + ":" + p2(off % 60);
-  }
-
   function ufCodigo(uf) { return UFS[String(uf || "").toUpperCase()] || "43"; }
 
   /* Dígito verificador da chave (módulo 11, pesos 2..9) */
@@ -100,7 +87,10 @@
       "</" + tag + ">";
   }
 
-  function xmlNFe(nota) {
+  function xmlNFe(nota, opcoes) {
+    /* Quando a nota ja foi autorizada pela SEFAZ, o XML oficial (nfeProc
+       assinado + protocolo real) é o que vale. */
+    if (!(opcoes && opcoes.somenteNFe) && nota.procXml) return nota.procXml;
     var em = nota.emitente || {};
     var de = nota.destinatario || {};
     var itens = nota.itens || [];
@@ -116,7 +106,7 @@
       "<mod>" + pad(nota.modelo || "55", 2) + "</mod>" +
       "<serie>" + Number(dig(nota.serie) || 1) + "</serie>" +
       "<nNF>" + Number(dig(nota.numero) || 1) + "</nNF>" +
-      "<dhEmi>" + (nota.dhEmi || dataHoraSefaz()) + "</dhEmi>" +
+      "<dhEmi>" + dataHoraSefaz(nota.dhEmi) + "</dhEmi>" +
       "<tpNF>" + (nota.tipoOperacao || "1") + "</tpNF>" +
       "<idDest>" + (String(de.uf || em.uf) === String(em.uf) ? "1" : "2") + "</idDest>" +
       "<cMunFG>" + pad(em.codigoMunicipio || "4300000", 7) + "</cMunFG>" +
@@ -125,7 +115,7 @@
       "<tpAmb>" + (nota.ambiente || "2") + "</tpAmb>" +
       "<finNFe>" + (nota.finalidade || "1") + "</finNFe>" +
       "<indFinal>" + (nota.consumidorFinal || "1") + "</indFinal>" +
-      "<indPres>1</indPres><procEmi>0</procEmi><verProc>CCGAMBIN-ERP-2.0</verProc>" +
+      "<indPres>1</indPres><procEmi>0</procEmi><verProc>CCGAMBIN-ERP-1.6</verProc>" +
       "</ide>";
 
     var emit = "<emit>" +
@@ -211,6 +201,13 @@
         "</X509Certificate></X509Data></KeyInfo></Signature>"
       : "";
 
+    /* XML da NF-e sem assinatura e sem protocolo: é o que vai para o agente
+       local assinar com o certificado e transmitir à SEFAZ. */
+    if (opcoes && opcoes.somenteNFe) {
+      return '<?xml version="1.0" encoding="UTF-8"?>' +
+        '<NFe xmlns="http://www.portalfiscal.inf.br/nfe">' + infNFe + '</NFe>';
+    }
+
     return '<?xml version="1.0" encoding="UTF-8"?>' +
       '<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">' +
       '<NFe xmlns="http://www.portalfiscal.inf.br/nfe">' + infNFe + assinatura + "</NFe>" +
@@ -256,14 +253,38 @@
       "</infEvento></retEvento></procEventoNFe>";
   }
 
-  /* XML puro <NFe>...</NFe> para enviar ao agente assinar e transmitir.
-     Nao inclui nfeProc nem assinatura simulada. */
-  function xmlEnvio(nota) {
-    var limpa = Object.assign({}, nota, { assinatura: null, protocolo: null });
-    var completo = xmlNFe(limpa);
-    var i = completo.indexOf("<NFe ");
-    var j = completo.indexOf("</NFe>");
-    return i >= 0 && j > i ? completo.substring(i, j + 6) : completo;
+  /* Evento de cancelamento SEM assinatura — enviado ao agente local para ser
+     assinado com o certificado e transmitido ao RecepcaoEvento4 da SEFAZ. */
+  function xmlEventoCancelamento(nota, canc) {
+    var em = nota.emitente || {};
+    var seq = String(canc.sequencia || "1");
+    var id = "ID110111" + nota.chave + pad(seq, 2);
+    return '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<evento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">' +
+      '<infEvento Id="' + id + '">' +
+      "<cOrgao>" + pad(ufCodigo(em.uf), 2) + "</cOrgao>" +
+      "<tpAmb>" + (nota.ambiente || "2") + "</tpAmb>" +
+      "<CNPJ>" + pad(em.cnpj, 14) + "</CNPJ>" +
+      "<chNFe>" + nota.chave + "</chNFe>" +
+      "<dhEvento>" + (canc.dataHoraSefaz || dataHoraSefaz(canc.dataHora)) + "</dhEvento>" +
+      "<tpEvento>110111</tpEvento><nSeqEvento>" + Number(seq) + "</nSeqEvento><verEvento>1.00</verEvento>" +
+      '<detEvento versao="1.00"><descEvento>Cancelamento</descEvento>' +
+      "<nProt>" + esc(canc.protocoloNFe || "") + "</nProt>" +
+      "<xJust>" + esc(texto(canc.justificativa, 255)) + "</xJust>" +
+      "</detEvento></infEvento></evento>";
+  }
+
+  /* Data/hora no formato exigido pela SEFAZ: AAAA-MM-DDThh:mm:ss-03:00 */
+  function dataHoraSefaz(valor) {
+    var d = valor ? new Date(valor) : new Date();
+    if (isNaN(d.getTime())) d = new Date();
+    function p2(v) { return (v < 10 ? "0" : "") + v; }
+    var off = -d.getTimezoneOffset();
+    var sinal = off >= 0 ? "+" : "-";
+    var abs = Math.abs(off);
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) + "T" +
+      p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" + p2(d.getSeconds()) +
+      sinal + p2(Math.floor(abs / 60)) + ":" + p2(abs % 60);
   }
 
   function nomeArquivo(nota, sufixo) {
@@ -335,8 +356,8 @@
     UFS: UFS, AMBIENTES: AMBIENTES, MODELOS: MODELOS, NATUREZAS: NATUREZAS,
     ufCodigo: ufCodigo, dvChave: dvChave, chaveAcesso: chaveAcesso, chaveFormatada: chaveFormatada,
     codigoNumerico: codigoNumerico, proximoNumero: proximoNumero,
-    xmlNFe: xmlNFe, xmlEnvio: xmlEnvio, xmlCancelamento: xmlCancelamento, nomeArquivo: nomeArquivo,
-    dataHoraSefaz: dataHoraSefaz,
+    xmlNFe: xmlNFe, xmlCancelamento: xmlCancelamento, xmlEventoCancelamento: xmlEventoCancelamento,
+    dataHoraSefaz: dataHoraSefaz, nomeArquivo: nomeArquivo,
     baixar: baixar, zip: zip, texto: texto, digitos: dig, pad: pad
   };
 })(window);

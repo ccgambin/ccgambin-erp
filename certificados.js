@@ -272,6 +272,13 @@
       etapas + "</div>";
   }
 
+  /* API pública usada por Notas Fiscais e demais módulos fiscais */
+  w.Certificados = {
+    lista: lista, ativo: ativo, ativar: ativar,
+    diasRestantes: diasRestantes, situacao: situacao, selo: selo,
+    detectado: detectado, ufPadrao: ufPadrao
+  };
+
   w.Modulos.certificados = function (el) {
     verificarAgente(false);
 

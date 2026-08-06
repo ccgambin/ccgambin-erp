@@ -192,6 +192,7 @@
   }
 
   w.Modulos.vendedores = tela("clientes", "Vendedores(a)", "Cadastro de vendedores(as) com busca de endereço por CEP");
-  w.Modulos.clientes = w.Modulos.vendedores;
+  /* NAO sobrescrever Modulos.clientes: a tela "Clientes (NF-e)" vem de clientes.js
+     (colecao "clientesnf"), que alimenta o destinatario da nota fiscal. */
   w.Modulos.fornecedores = tela("fornecedores", "Fornecedores", "Cadastro de fornecedores (sem duplicidade)");
 })(window);

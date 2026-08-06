@@ -1,9 +1,41 @@
 /* Notas Fiscais — emissão, cancelamento, exportação de XML e backup */
 (function (w) {
   w.Modulos = w.Modulos || {};
-  var estado = { editando: null, itens: [], filtros: {}, cancelando: null, cab: {} };
+  var estado = { editando: null, itens: [], filtros: {}, cancelando: null, cab: {},
+                 agente: { online: null, dados: null }, sefaz: null, ocupado: "" };
 
   function notas() { return DB.read("notas").slice().reverse(); }
+
+  /* Destinatários da NF-e: coleção "clientesnf". Registros antigos gravados em
+     "clientes" (versões anteriores) são aproveitados automaticamente, para o
+     módulo nunca ficar "sem dados para emitir". */
+  function destinatarios() {
+    var nf = DB.read("clientesnf");
+    var vistos = {};
+    nf.forEach(function (c) { vistos[Utils.soDigitos(c.documento)] = true; });
+    var legado = DB.read("clientes").filter(function (c) {
+      var doc = Utils.soDigitos(c.documento);
+      return c.nome && doc && !vistos[doc];
+    });
+    return nf.concat(legado);
+  }
+
+  /* Dados do certificado enviados ao agente local (a chave privada nunca sai da máquina) */
+  function credencial(cert) {
+    if (!cert) return null;
+    if (cert.thumbprint) return { thumbprint: cert.thumbprint };
+    if (cert.arquivoBase64) return { pfxBase64: cert.arquivoBase64, senha: cert.senha || "" };
+    return null;
+  }
+
+  function textoErro(e) {
+    var m = String((e && e.message) || e || "");
+    if (m === "AGENTE_OFFLINE") {
+      return "O Agente Local não está rodando neste computador. Abra o agente (pasta agente/ — iniciar.bat/iniciar.sh) " +
+        "para o sistema conseguir usar o certificado e falar com a SEFAZ.";
+    }
+    return m;
+  }
   function emitenteConfig() {
     var cfg = DB.config();
     var cert = Certificados.ativo();
@@ -13,15 +45,6 @@
       bairro: cfg.bairro || "", cidade: cfg.cidade || "", uf: cfg.uf || "RS", cep: cfg.cep || "",
       telefone: cfg.telefone, codigoMunicipio: cfg.codigoMunicipio || ""
     };
-  }
-  function base64Digest(texto) {
-    if (!(w.crypto && crypto.subtle)) return Promise.resolve(btoa(String(texto.length + "-" + Date.now())).substring(0, 28));
-    var bytes = new TextEncoder().encode(texto);
-    return crypto.subtle.digest("SHA-1", bytes).then(function (buf) {
-      var arr = new Uint8Array(buf), s = "";
-      for (var i = 0; i < arr.length; i++) s += String.fromCharCode(arr[i]);
-      return btoa(s);
-    });
   }
   function totalNota(n) {
     var prod = (n.itens || []).reduce(function (t, i) {
@@ -35,12 +58,130 @@
       : { nfe: n.xml || Fiscal.xmlNFe(n), evento: null };
   }
 
+  /* Painel de conexão: Agente Local + SEFAZ */
+  function painelSefaz(cert, em) {
+    var ag = estado.agente || {};
+    var sf = estado.sefaz;
+    var online = ag.online === true;
+    var estadoAgente = ag.online === null
+      ? UI.badge("VERIFICANDO...", "info")
+      : online ? UI.badge("AGENTE ONLINE v" + ((ag.dados || {}).versao || "?"), "ok")
+               : UI.badge("AGENTE OFFLINE", "bad");
+    var estadoSefaz = !sf
+      ? UI.badge("NAO TESTADO", "info")
+      : sf.erro ? UI.badge("SEM CONEXAO", "bad")
+      : sf.ok ? UI.badge("EM OPERACAO", "ok")
+      : UI.badge("cStat " + (sf.cStat || "-"), "warn");
+
+    var detalhe = sf
+      ? '<p style="font-size:12px;color:var(--muted);margin:10px 0 0">' +
+        (sf.erro
+          ? "Falha: " + UI.esc(sf.erro)
+          : "cStat " + UI.esc(sf.cStat || "-") + " — " + UI.esc(sf.xMotivo || "") +
+            (sf.tMed ? " — tempo médio de resposta: " + UI.esc(sf.tMed) + "s" : "")) +
+        (sf.endpoint ? "<br />Webservice: " + UI.esc(sf.endpoint) : "") + "</p>"
+      : "";
+
+    var ajuda = online ? "" :
+      '<p style="font-size:12px;color:var(--muted);margin:10px 0 0">' +
+      "Para assinar o XML e falar com a SEFAZ o Agente Local precisa estar rodando neste computador " +
+      "(pasta <strong>agente/</strong> — execute <strong>instalar.bat</strong> uma vez e depois <strong>iniciar.bat</strong>). " +
+      "Ele escuta apenas em 127.0.0.1:8712 e nunca envia a chave privada do certificado.</p>";
+
+    return '<div class="card"><div class="row" style="margin-bottom:6px"><h2 style="margin:0">Conexão com a SEFAZ</h2>' +
+      '<span class="right">' + estadoAgente + " " + estadoSefaz + "</span></div>" +
+      '<p style="font-size:13px;color:var(--muted);margin:0">UF ' + UI.esc(em.uf || "RS") +
+      " — ambiente " + ((cert && cert.ambiente === "1") ? "Produção" : "Homologação") +
+      " — certificado " + UI.esc(cert ? cert.tipo + " / " + (cert.titular || "") : "nenhum ativo") + "</p>" +
+      detalhe + ajuda +
+      '<div class="row" style="margin-top:12px">' +
+      '<button type="button" class="btn ghost" id="testarSefaz">' +
+      (estado.ocupado === "sefaz" ? "Consultando SEFAZ..." : "Testar conexão com a SEFAZ") + "</button>" +
+      '<button type="button" class="btn ghost" id="reconectarAgente">Reconectar agente</button>' +
+      '<a class="btn ghost" href="#/certificados">Certificado digital</a></div></div>';
+  }
+
+  /* Avisa exatamente o que falta para conseguir emitir */
+  function pendencias(cert, em, clientes, produtos) {
+    var faltas = [];
+    if (!Fiscal.digitos(em.cnpj)) faltas.push('CNPJ da empresa não cadastrado — <a href="#/configuracoes">abrir Configurações</a>');
+    if (!em.ie) faltas.push('Inscrição Estadual não cadastrada — <a href="#/configuracoes">abrir Configurações</a>');
+    if (!Fiscal.digitos(em.codigoMunicipio)) faltas.push('Código IBGE do município do emitente não cadastrado — <a href="#/configuracoes">abrir Configurações</a>');
+    if (!cert) faltas.push('Nenhum certificado digital ativo — <a href="#/certificados">instalar certificado</a>');
+    if (!clientes.length) faltas.push('Nenhum destinatário cadastrado — <a href="#/clientes">cadastrar cliente (NF-e)</a>');
+    if (!produtos.length) faltas.push('Nenhum produto cadastrado — <a href="#/produtos">cadastrar produto</a>');
+    if (!faltas.length) return "";
+    return '<div class="card"><h2>Pendências para emitir a nota</h2><ul style="margin:10px 0 0 18px;font-size:13px;line-height:1.9">' +
+      faltas.map(function (t) { return "<li>" + t + "</li>"; }).join("") + "</ul></div>";
+  }
+
+  /* Assina e transmite a NF-e para a SEFAZ pelo Agente Local */
+  function transmitir(nota, cert) {
+    var cred = credencial(cert);
+    if (!cred) {
+      alert("Ative um certificado digital (A1 .pfx ou A3 detectado pelo agente) para transmitir a nota.");
+      Router.refresh();
+      return;
+    }
+    estado.ocupado = "emitir";
+    Router.refresh();
+
+    var xmlEnvio = nota.xml && /<NFe/i.test(nota.xml) && !/nfeProc/i.test(nota.xml)
+      ? nota.xml
+      : Fiscal.xmlNFe(nota, { somenteNFe: true });
+
+    Agente.autorizarNFe(Object.assign({
+      uf: (nota.emitente || {}).uf || "RS",
+      ambiente: nota.ambiente || "2",
+      xml: xmlEnvio
+    }, cred)).then(function (r) {
+      estado.ocupado = "";
+      if (!r.ok) {
+        DB.update("notas", nota.id, {
+          status: "PENDENTE",
+          retorno: { cStat: r.cStat, xMotivo: r.xMotivo, em: new Date().toISOString(), endpoint: r.endpoint }
+        });
+        alert("A SEFAZ NÃO autorizou a NF-e " + nota.serie + "/" + nota.numero + ".\n\n" +
+          "cStat " + (r.cStat || "-") + " — " + (r.xMotivo || "sem motivo informado.") +
+          "\n\nCorrija o cadastro e use o botão \"Transmitir à SEFAZ\" na lista para reenviar.");
+        Router.refresh();
+        return;
+      }
+      DB.update("notas", nota.id, {
+        status: "EMITIDA",
+        chave: r.chave || nota.chave,
+        procXml: r.xmlAutorizado,
+        xml: r.xmlAutorizado,
+        assinatura: { digest: r.digVal || "" },
+        protocolo: {
+          numero: r.protocolo, dataHora: r.dhRecbto, digest: r.digVal,
+          status: r.cStat, motivo: r.xMotivo
+        },
+        transmissao: { modo: "SEFAZ", endpoint: r.endpoint, httpCode: r.httpCode, em: new Date().toISOString() }
+      });
+      Fiscal.baixar(Fiscal.nomeArquivo(nota), r.xmlAutorizado);
+      alert("NF-e " + nota.serie + "/" + nota.numero + " AUTORIZADA pela SEFAZ.\n" +
+        "cStat " + r.cStat + " — " + r.xMotivo + "\nProtocolo: " + r.protocolo +
+        "\nChave: " + (r.chave || nota.chave) + "\n\nO XML autorizado foi baixado automaticamente.");
+      Router.refresh();
+    }, function (e) {
+      estado.ocupado = "";
+      DB.update("notas", nota.id, {
+        status: "PENDENTE",
+        retorno: { erro: textoErro(e), em: new Date().toISOString() }
+      });
+      alert("Não foi possível transmitir a NF-e à SEFAZ.\n\n" + textoErro(e) +
+        "\n\nA nota ficou salva como NÃO TRANSMITIDA: resolva a conexão e clique em \"Transmitir à SEFAZ\".");
+      Router.refresh();
+    });
+  }
+
   w.Modulos.notas = function (el) {
     var cert = Certificados.ativo();
     if (estado.clientePre) { estado.cab = Object.assign({}, estado.cab, { clienteId: estado.clientePre }); estado.clientePre = null; }
     var cab = estado.cab || {};
     var em = emitenteConfig();
-    var clientes = DB.read("clientesnf");
+    var clientes = destinatarios();
     var produtos = DB.read("produtos");
     var todas = notas();
     var f = estado.filtros || {};
@@ -84,6 +225,9 @@
         UI.stat("Certificado", cert ? UI.badge(cert.tipo + " " + sit.texto, sit.tipo) : UI.badge("NÃO INSTALADO", "bad"), cert ? "c5" : "c3") +
       "</div>" +
 
+      painelSefaz(cert, em) +
+      pendencias(cert, em, clientes, produtos) +
+
       (cert ? "" : '<div class="card"><h2>Certificado digital necessário</h2>' +
         '<p style="font-size:13px;color:var(--muted);margin:8px 0 12px">Instale e ative um certificado A1 (.pfx/.p12) ou A3 (token/cartão) ' +
         'antes de emitir notas fiscais.</p><a class="btn" href="#/certificados">Instalar certificado digital</a></div>') +
@@ -120,15 +264,18 @@
       '<strong class="right">Total dos itens: ' + Utils.moeda(totalAtual) + "</strong></div>" +
       itensHtml +
       '<p class="hint" style="text-align:left;margin:12px 0 8px">O XML é gerado no layout NF-e 4.00 e assinado com o certificado ativo (' +
-      UI.esc(cert ? cert.tipo + " — " + cert.titular : "nenhum") + '). Guarde os XMLs por 5 anos: use a exportação e o backup abaixo.</p>' +
-      '<div class="row"><button class="btn">Emitir e gerar XML</button>' +
+      UI.esc(cert ? cert.tipo + " — " + cert.titular : "nenhum") + '). O XML é assinado pelo Agente Local e transmitido ao webservice NFeAutorizacao4 da SEFAZ. ' +
+      'Guarde os XMLs por 5 anos: use a exportação e o backup abaixo.</p>' +
+      '<div class="row"><button class="btn" id="btnEmitir">' +
+      (estado.ocupado === "emitir" ? "Transmitindo à SEFAZ..." : "Emitir e transmitir à SEFAZ") + "</button>" +
       '<button type="button" class="btn ghost" id="limpar">Limpar</button></div></form></div>' +
 
       UI.filtros(
         UI.campo("De", UI.input("de", { type: "date", value: f.de || "" })) +
         UI.campo("Até", UI.input("ate", { type: "date", value: f.ate || "" })) +
         UI.campo("Status", UI.select("status", [{ valor: "", label: "Todas" },
-          { valor: "EMITIDA", label: "Emitidas" }, { valor: "CANCELADA", label: "Canceladas" }], f.status || "")) +
+          { valor: "EMITIDA", label: "Autorizadas" }, { valor: "PENDENTE", label: "Pendentes de transmissão" },
+          { valor: "CANCELADA", label: "Canceladas" }], f.status || "")) +
         UI.campo("Buscar", UI.input("busca", { value: f.busca || "", placeholder: "Número, chave ou destinatário" }))) +
 
       '<div class="card"><div class="row" style="margin-bottom:12px"><h2 style="margin:0">Notas fiscais</h2>' +
@@ -144,13 +291,22 @@
         { label: "Chave de acesso", render: function (n) { return '<span style="font-size:11px">' + UI.esc(Fiscal.chaveFormatada(n.chave)) + "</span>"; } },
         { label: "Total", render: function (n) { return Utils.moeda(totalNota(n)); } },
         { label: "Status", render: function (n) {
-            return n.status === "CANCELADA" ? UI.badge("CANCELADA", "bad") : UI.badge("EMITIDA", "ok"); } },
+            if (n.status === "CANCELADA") return UI.badge("CANCELADA", "bad");
+            if (n.status === "PENDENTE") return UI.badge("NAO TRANSMITIDA", "warn");
+            return UI.badge("AUTORIZADA", "ok"); } },
+        { label: "Protocolo", render: function (n) {
+            return '<span style="font-size:11px">' + UI.esc((n.protocolo || {}).numero || "-") + "</span>"; } },
         { label: "Amb.", render: function (n) { return n.ambiente === "1" ? "Produção" : "Homolog."; } },
         { label: "Ações", render: function (n) {
             return '<button class="btn sm ghost" data-xml="' + n.id + '">XML</button> ' +
+              (n.status === "PENDENTE"
+                ? '<button class="btn sm" data-transmitir="' + n.id + '">Transmitir à SEFAZ</button> '
+                : "") +
               (n.status === "CANCELADA"
                 ? '<button class="btn sm ghost" data-xmlcanc="' + n.id + '">XML canc.</button> '
-                : '<button class="btn sm danger" data-cancelar="' + n.id + '">Cancelar</button> ') +
+                : n.status === "EMITIDA"
+                  ? '<button class="btn sm danger" data-cancelar="' + n.id + '">Cancelar</button> '
+                  : "") +
               '<button class="btn sm ghost" data-danfe="' + n.id + '">Imprimir</button>'; } }
       ], lista, "Nenhuma nota fiscal encontrada.") + "</div>" +
 
@@ -253,56 +409,14 @@
         serie: nota.serie, numero: nota.numero, tpEmis: "1", cNF: cNF
       });
 
-      /* EMISSÃO REAL: o XML sai daqui sem assinatura; quem assina é o certificado
-         (A1 ou A3) dentro do Agente Local, que transmite ao NFeAutorizacao4 da SEFAZ.
-         Na v1.5 esta parte apenas fabricava um protocolo falso — a nota nunca existia. */
-      var botao = ev.target.querySelector("button.btn");
-      if (botao) { botao.disabled = true; botao.textContent = "Assinando e transmitindo à SEFAZ..."; }
-
-      var credenciais = {
-        uf: em.uf || "RS",
-        ambiente: nota.ambiente || "2",
-        thumbprint: cert.thumbprint || undefined,
-        pfxBase64: cert.thumbprint ? undefined : (cert.arquivoBase64 || undefined),
-        senha: cert.thumbprint ? undefined : (cert.senha || undefined)
-      };
-
-      function liberar() {
-        if (botao) { botao.disabled = false; botao.textContent = "Emitir e gerar XML"; }
-      }
-
-      Agente.emitirNFe(Object.assign({ xmlNFe: Fiscal.xmlEnvio(nota) }, credenciais)).then(function (r) {
-        if (!r.ok) {
-          liberar();
-          alert("A SEFAZ NÃO autorizou a NF-e.\n\n" +
-            "cStat " + (r.cStat || "-") + " — " + (r.xMotivo || r.erro || "sem detalhe") +
-            "\n\nA nota não foi gravada. Corrija os dados e emita novamente.");
-          return;
-        }
-        nota.chave = r.chave || nota.chave;
-        nota.status = "EMITIDA";
-        nota.protocolo = {
-          numero: r.nProt, dataHora: r.recebidoEm || new Date().toISOString(),
-          digest: r.digestValue || "", status: r.cStat, motivo: r.xMotivo
-        };
-        nota.xml = r.nfeProc;
-        nota.xmlAssinado = r.xmlAssinado;
-        nota.endpoint = r.endpoint;
-        var salva = DB.insert("notas", nota);
-        estado.itens = [];
-        estado.cab = {};
-        Fiscal.baixar(Fiscal.nomeArquivo(salva), salva.xml);
-        alert("NF-e " + salva.serie + "/" + salva.numero + " AUTORIZADA pela SEFAZ.\n" +
-          "Protocolo: " + r.nProt + "\nChave: " + salva.chave +
-          "\n\nO XML autorizado (nfeProc) foi baixado automaticamente.");
-        Router.refresh();
-      }, function (e) {
-        liberar();
-        alert(Agente.ehErroOffline(e) ? Agente.mensagemOffline() : "Falha ao emitir: " + e.message);
-      })["catch"](function (e) {
-        liberar();
-        console.error("Falha inesperada na emissão:", e);
-      });
+      /* A nota nasce PENDENTE e só vira AUTORIZADA quando a SEFAZ devolver
+         cStat 100 com protocolo. Nada de protocolo inventado. */
+      nota.status = "PENDENTE";
+      nota.xml = Fiscal.xmlNFe(nota, { somenteNFe: true });
+      var salva = DB.insert("notas", nota);
+      estado.itens = [];
+      estado.cab = {};
+      transmitir(salva, cert);
     });
 
     var frmCanc = el.querySelector("#frmCanc");
@@ -313,56 +427,93 @@
         var just = String(d.justificativa || "").trim();
         if (just.length < 15) { alert("A justificativa deve ter no mínimo 15 caracteres."); return; }
         var n = estado.cancelando;
-        var certAtivo = Certificados.ativo();
-        if (!certAtivo) { alert("Ative um certificado digital para cancelar a nota."); return; }
         if (!(n.protocolo || {}).numero) {
-          alert("Esta nota não possui protocolo de autorização da SEFAZ — não é possível cancelar.");
+          alert("Só é possível cancelar uma NF-e autorizada pela SEFAZ (com número de protocolo).");
           return;
         }
-        var btnC = ev.target.querySelector("button.btn");
-        if (btnC) { btnC.disabled = true; btnC.textContent = "Enviando evento à SEFAZ..."; }
+        var canc = {
+          justificativa: just,
+          dataHora: new Date().toISOString(),
+          dataHoraSefaz: Fiscal.dataHoraSefaz(),
+          protocoloNFe: (n.protocolo || {}).numero || "",
+          sequencia: "1"
+        };
+        var cred = credencial(cert);
+        if (!cred) { alert("Ative um certificado digital para cancelar a nota na SEFAZ."); return; }
 
-        /* CANCELAMENTO REAL: evento 110111 assinado e enviado ao NFeRecepcaoEvento4. */
-        Agente.cancelarNFe({
-          uf: (n.emitente || {}).uf || "RS",
+        var botao = ev.target.querySelector("button.danger");
+        if (botao) { botao.disabled = true; botao.textContent = "Transmitindo cancelamento..."; }
+
+        Agente.cancelarNFe(Object.assign({
+          uf: (n.emitente || {}).uf || em.uf,
           ambiente: n.ambiente || "2",
-          thumbprint: certAtivo.thumbprint || undefined,
-          pfxBase64: certAtivo.thumbprint ? undefined : (certAtivo.arquivoBase64 || undefined),
-          senha: certAtivo.thumbprint ? undefined : (certAtivo.senha || undefined),
-          chave: n.chave,
-          cnpj: (n.emitente || {}).cnpj,
-          protocolo: (n.protocolo || {}).numero,
-          justificativa: just
-        }).then(function (r) {
-          if (btnC) { btnC.disabled = false; btnC.textContent = "Confirmar cancelamento"; }
+          xml: Fiscal.xmlEventoCancelamento(n, canc)
+        }, cred)).then(function (r) {
           if (!r.ok) {
-            alert("A SEFAZ não homologou o cancelamento.\n\ncStat " + (r.cStat || "-") +
-              " — " + (r.xMotivo || r.erro || "sem detalhe"));
+            if (botao) { botao.disabled = false; botao.textContent = "Confirmar cancelamento"; }
+            alert("A SEFAZ NÃO registrou o cancelamento.\ncStat " + (r.cStat || "-") + " — " + (r.xMotivo || "sem motivo informado."));
             return;
           }
-          var canc = {
-            justificativa: just, dataHora: new Date().toISOString(),
-            protocoloNFe: (n.protocolo || {}).numero || "",
-            protocolo: r.nProt || "", cStat: r.cStat, xMotivo: r.xMotivo
-          };
+          canc.protocolo = r.protocolo;
+          canc.dhRegEvento = r.dhRegEvento;
+          canc.cStat = r.cStat;
+          canc.motivo = r.xMotivo;
           DB.update("notas", n.id, {
-            status: "CANCELADA", cancelamento: canc, xmlCancelamento: r.procEvento
+            status: "CANCELADA", cancelamento: canc, xmlCancelamento: r.xmlCancelamento
           });
           estado.cancelando = null;
-          Fiscal.baixar(Fiscal.nomeArquivo(n, "-canc"), r.procEvento);
-          alert("Cancelamento homologado pela SEFAZ.\nProtocolo do evento: " + (r.nProt || "-") +
-            "\nO XML do evento foi baixado.");
-          Router.refresh();
+          Fiscal.baixar(Fiscal.nomeArquivo(n, "-canc"), r.xmlCancelamento);
+          alert("Cancelamento homologado pela SEFAZ.\ncStat " + r.cStat + " — " + r.xMotivo +
+            "\nProtocolo do evento: " + r.protocolo);
         }, function (e) {
-          if (btnC) { btnC.disabled = false; btnC.textContent = "Confirmar cancelamento"; }
-          alert(Agente.ehErroOffline(e) ? Agente.mensagemOffline() : "Falha ao cancelar: " + e.message);
-        })["catch"](function (e) { console.error("Falha inesperada no cancelamento:", e); });
+          if (botao) { botao.disabled = false; botao.textContent = "Confirmar cancelamento"; }
+          alert("Não foi possível cancelar na SEFAZ.\n\n" + textoErro(e));
+        });
       });
       el.querySelector("#cancCancelar").addEventListener("click", function () {
         estado.cancelando = null;
         Router.refresh();
       });
     }
+
+    /* Monitor do agente local: liga/desliga sozinho e atualiza o painel */
+    if (!estado.monitorando && w.Agente) {
+      estado.monitorando = true;
+      Agente.monitorar(function (online, dados) {
+        var mudou = estado.agente.online !== online;
+        estado.agente = { online: online, dados: dados };
+        if (mudou && location.hash.indexOf("notas") >= 0) Router.refresh();
+      }, 10000);
+    }
+
+    el.querySelector("#testarSefaz").addEventListener("click", function () {
+      var cred = credencial(cert);
+      if (!cred) { alert("Ative um certificado digital para consultar a SEFAZ."); return; }
+      estado.ocupado = "sefaz";
+      Router.refresh();
+      Agente.statusServico(Object.assign({
+        uf: em.uf || "RS", ambiente: (cab.ambiente || (cert && cert.ambiente) || "2")
+      }, cred)).then(function (r) {
+        estado.ocupado = "";
+        estado.sefaz = r;
+        Router.refresh();
+      }, function (e) {
+        estado.ocupado = "";
+        estado.sefaz = { erro: textoErro(e) };
+        Router.refresh();
+      });
+    });
+
+    el.querySelector("#reconectarAgente").addEventListener("click", function () {
+      Agente.status().then(function (r) {
+        estado.agente = { online: true, dados: r };
+        Router.refresh();
+      }, function (e) {
+        estado.agente = { online: false, dados: null };
+        alert(textoErro(e));
+        Router.refresh();
+      });
+    });
 
     el.querySelector("#expLote").addEventListener("click", function () {
       if (!lista.length) { alert("Nenhuma nota no filtro atual para exportar."); return; }
@@ -423,7 +574,7 @@
       if (!t.getAttribute) return;
       var rm = t.getAttribute("data-rmitem"), x = t.getAttribute("data-xml");
       var xc = t.getAttribute("data-xmlcanc"), cn = t.getAttribute("data-cancelar");
-      var dn = t.getAttribute("data-danfe");
+      var dn = t.getAttribute("data-danfe"), tr = t.getAttribute("data-transmitir");
       if (rm) {
         estado.itens = estado.itens.filter(function (i) { return i.uid !== rm; });
         Router.refresh();
@@ -436,6 +587,13 @@
         if (n3) { estado.cancelando = n3; Router.refresh(); }
       }
       if (dn) { var n4 = nota(dn); if (n4) imprimir(n4); }
+      if (tr) {
+        var n5 = nota(tr);
+        if (n5) {
+          if (!cert) { alert("Ative um certificado digital antes de transmitir."); return; }
+          transmitir(n5, cert);
+        }
+      }
     });
   };
 
