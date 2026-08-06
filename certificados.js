@@ -36,13 +36,20 @@
     if (d <= 30) return { texto: "VENCE EM " + d + " DIAS", tipo: "warn" };
     return { texto: "VÁLIDO (" + d + " dias)", tipo: "ok" };
   }
+  var SELOS = {
+    VALIDADO: ["HOMOLOGADO SEFAZ", "ok"],
+    REVOGADO: ["REVOGADO", "bad"],
+    VENCIDO: ["VENCIDO", "bad"],
+    SEFAZ_INDISPONIVEL: ["SEFAZ FORA DO AR", "warn"],
+    SEM_COMUNICACAO: ["SEM COMUNICAÇÃO", "warn"],
+    PENDENTE_TOKEN: ["AGUARDANDO TOKEN/PIN", "warn"],
+    NAO_VALIDADO: ["NÃO ACEITO", "bad"]
+  };
   function selo(c) {
     var v = c && c.validacao;
     if (!v) return UI.badge("NÃO VALIDADO", "info");
-    if (v.situacao === "VALIDADO") return UI.badge("HOMOLOGADO SEFAZ", "ok");
-    if (v.situacao === "REVOGADO") return UI.badge("REVOGADO", "bad");
-    if (v.situacao === "VENCIDO") return UI.badge("VENCIDO", "bad");
-    return UI.badge("FALHOU", "warn");
+    var s = SELOS[v.situacao] || ["FALHOU", "warn"];
+    return UI.badge(s[0], s[1]);
   }
 
   function base64(arrayBuffer) {
@@ -61,7 +68,23 @@
   }
 
   /* -------------------------------------------------------------- agente */
+  /* Vigia permanente: assim que o agente sobe (ou cai), a tela se atualiza
+     sozinha — o usuário não precisa clicar em "Reconectar". */
+  var vigia = null;
+  function iniciarVigia() {
+    if (vigia || !w.Agente || !Agente.monitorar) return;
+    vigia = Agente.monitorar(function (online, info) {
+      var mudou = estado.agente.online !== online;
+      estado.agente = {
+        verificando: false, online: online, info: info,
+        erro: online ? null : "Agente local não está em execução."
+      };
+      if (mudou) Router.refresh();
+    }, 8000);
+  }
+
   function verificarAgente(forcar) {
+    iniciarVigia();
     if (estado.agente.verificando) return;
     if (!forcar && estado.agente.online !== null) return;
     estado.agente.verificando = true;
@@ -117,7 +140,7 @@
       if (cert.id) {
         DB.update("certificados", cert.id, {
           validacao: {
-            situacao: r.situacao, homologado: r.homologado, validadoEm: r.validadoEm,
+            situacao: r.situacao, homologado: r.homologado, resumo: r.resumo, conclusivo: r.conclusivo, validadoEm: r.validadoEm,
             uf: r.uf, ambiente: r.ambiente,
             cStat: r.sefaz && r.sefaz.cStat, xMotivo: r.sefaz && r.sefaz.xMotivo,
             etapas: r.etapas
@@ -238,9 +261,11 @@
     }).join("");
     return '<div class="card"><div class="row" style="margin-bottom:10px">' +
       '<h2 style="margin:0">Resultado da validação junto aos órgãos</h2>' +
-      UI.badge(r.situacao, r.situacao === "VALIDADO" ? "ok" : "bad") +
+      UI.badge((SELOS[r.situacao] || [r.situacao, "bad"])[0], (SELOS[r.situacao] || ["", "bad"])[1]) +
       '<button class="btn ghost right" id="baixarRel">Baixar relatório (.txt)</button>' +
       '<button class="btn ghost" id="baixarRelJson">Baixar JSON</button></div>' +
+      (r.resumo ? '<p style="margin:0 0 6px;font-size:14px"><strong>' + UI.esc(r.resumo) + "</strong></p>" : "") +
+      (r.conclusivo === false ? '<p class="hint" style="text-align:left">Resultado NÃO conclusivo: a falha foi de comunicação, não do certificado. Tente novamente em alguns minutos.</p>' : "") +
       '<p class="hint" style="text-align:left">' +
       UI.esc((r.certificado || "") + " · " + r.uf + " · " + (String(r.ambiente) === "1" ? "Produção" : "Homologação") +
         " · " + new Date(r.validadoEm).toLocaleString("pt-BR") + " · " + r.duracaoMs + " ms") + "</p>" +

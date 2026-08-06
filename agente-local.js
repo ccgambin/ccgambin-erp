@@ -41,6 +41,25 @@
     });
   }
 
+  function diagnostico(uf, ambiente) {
+    return requisicao("/api/diagnostico?uf=" + encodeURIComponent(uf || "RS") + "&ambiente=" + (ambiente || "2"), null, 20000);
+  }
+
+  /* Reconecta sozinho: fica tentando falar com o agente e avisa quando ele sobe/cai. */
+  function monitorar(aoMudar, intervalo) {
+    var anterior = null;
+    function ciclo() {
+      status().then(function (r) {
+        if (anterior !== true) { anterior = true; try { aoMudar(true, r); } catch (e) { /* callback */ } }
+      }, function () {
+        if (anterior !== false) { anterior = false; try { aoMudar(false, null); } catch (e) { /* callback */ } }
+      });
+    }
+    ciclo();
+    var t = setInterval(ciclo, intervalo || 8000);
+    return function () { clearInterval(t); };
+  }
+
   function detectar() { return requisicao("/api/certificados", null, TEMPO.detectar); }
   function drivers() { return requisicao("/api/drivers", null, TEMPO.status); }
   function validar(payload) { return requisicao("/api/validar", { method: "POST", body: payload }, TEMPO.validar); }
@@ -50,6 +69,8 @@
     status: status,
     detectar: detectar,
     drivers: drivers,
+    diagnostico: diagnostico,
+    monitorar: monitorar,
     validar: validar,
     offline: function () { return cache.online === false; },
     ultimo: function () { return cache; },
