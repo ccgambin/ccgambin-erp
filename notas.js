@@ -253,22 +253,55 @@
         serie: nota.serie, numero: nota.numero, tpEmis: "1", cNF: cNF
       });
 
-      base64Digest(Fiscal.xmlNFe(nota)).then(function (digest) {
-        nota.assinatura = {
-          digest: digest, valor: digest + digest,
-          certificado: (cert.arquivoBase64 || "").substring(0, 2000) || "A3-TOKEN-" + Fiscal.digitos(cert.documento)
-        };
+      /* EMISSÃO REAL: o XML sai daqui sem assinatura; quem assina é o certificado
+         (A1 ou A3) dentro do Agente Local, que transmite ao NFeAutorizacao4 da SEFAZ.
+         Na v1.5 esta parte apenas fabricava um protocolo falso — a nota nunca existia. */
+      var botao = ev.target.querySelector("button.btn");
+      if (botao) { botao.disabled = true; botao.textContent = "Assinando e transmitindo à SEFAZ..."; }
+
+      var credenciais = {
+        uf: em.uf || "RS",
+        ambiente: nota.ambiente || "2",
+        thumbprint: cert.thumbprint || undefined,
+        pfxBase64: cert.thumbprint ? undefined : (cert.arquivoBase64 || undefined),
+        senha: cert.thumbprint ? undefined : (cert.senha || undefined)
+      };
+
+      function liberar() {
+        if (botao) { botao.disabled = false; botao.textContent = "Emitir e gerar XML"; }
+      }
+
+      Agente.emitirNFe(Object.assign({ xmlNFe: Fiscal.xmlEnvio(nota) }, credenciais)).then(function (r) {
+        if (!r.ok) {
+          liberar();
+          alert("A SEFAZ NÃO autorizou a NF-e.\n\n" +
+            "cStat " + (r.cStat || "-") + " — " + (r.xMotivo || r.erro || "sem detalhe") +
+            "\n\nA nota não foi gravada. Corrija os dados e emita novamente.");
+          return;
+        }
+        nota.chave = r.chave || nota.chave;
+        nota.status = "EMITIDA";
         nota.protocolo = {
-          numero: "9" + Fiscal.pad(Date.now().toString().slice(-14), 14),
-          dataHora: new Date().toISOString(), digest: digest,
-          status: "100", motivo: "Autorizado o uso da NF-e"
+          numero: r.nProt, dataHora: r.recebidoEm || new Date().toISOString(),
+          digest: r.digestValue || "", status: r.cStat, motivo: r.xMotivo
         };
-        nota.xml = Fiscal.xmlNFe(nota);
+        nota.xml = r.nfeProc;
+        nota.xmlAssinado = r.xmlAssinado;
+        nota.endpoint = r.endpoint;
         var salva = DB.insert("notas", nota);
         estado.itens = [];
         estado.cab = {};
         Fiscal.baixar(Fiscal.nomeArquivo(salva), salva.xml);
-        alert("NF-e " + salva.serie + "/" + salva.numero + " emitida.\nChave: " + salva.chave + "\nO XML foi baixado automaticamente.");
+        alert("NF-e " + salva.serie + "/" + salva.numero + " AUTORIZADA pela SEFAZ.\n" +
+          "Protocolo: " + r.nProt + "\nChave: " + salva.chave +
+          "\n\nO XML autorizado (nfeProc) foi baixado automaticamente.");
+        Router.refresh();
+      }, function (e) {
+        liberar();
+        alert(Agente.ehErroOffline(e) ? Agente.mensagemOffline() : "Falha ao emitir: " + e.message);
+      })["catch"](function (e) {
+        liberar();
+        console.error("Falha inesperada na emissão:", e);
       });
     });
 
@@ -280,19 +313,50 @@
         var just = String(d.justificativa || "").trim();
         if (just.length < 15) { alert("A justificativa deve ter no mínimo 15 caracteres."); return; }
         var n = estado.cancelando;
-        var canc = {
-          justificativa: just, dataHora: new Date().toISOString(),
-          protocoloNFe: (n.protocolo || {}).numero || "",
-          protocolo: "1" + Fiscal.pad(Date.now().toString().slice(-14), 14)
-        };
-        var atualizada = Object.assign({}, n, { status: "CANCELADA", cancelamento: canc });
-        atualizada.xmlCancelamento = Fiscal.xmlCancelamento(atualizada, canc);
-        DB.update("notas", n.id, {
-          status: "CANCELADA", cancelamento: canc, xmlCancelamento: atualizada.xmlCancelamento
-        });
-        estado.cancelando = null;
-        Fiscal.baixar(Fiscal.nomeArquivo(atualizada, "-canc"), atualizada.xmlCancelamento);
-        alert("NF-e cancelada. O XML do evento de cancelamento foi baixado.");
+        var certAtivo = Certificados.ativo();
+        if (!certAtivo) { alert("Ative um certificado digital para cancelar a nota."); return; }
+        if (!(n.protocolo || {}).numero) {
+          alert("Esta nota não possui protocolo de autorização da SEFAZ — não é possível cancelar.");
+          return;
+        }
+        var btnC = ev.target.querySelector("button.btn");
+        if (btnC) { btnC.disabled = true; btnC.textContent = "Enviando evento à SEFAZ..."; }
+
+        /* CANCELAMENTO REAL: evento 110111 assinado e enviado ao NFeRecepcaoEvento4. */
+        Agente.cancelarNFe({
+          uf: (n.emitente || {}).uf || "RS",
+          ambiente: n.ambiente || "2",
+          thumbprint: certAtivo.thumbprint || undefined,
+          pfxBase64: certAtivo.thumbprint ? undefined : (certAtivo.arquivoBase64 || undefined),
+          senha: certAtivo.thumbprint ? undefined : (certAtivo.senha || undefined),
+          chave: n.chave,
+          cnpj: (n.emitente || {}).cnpj,
+          protocolo: (n.protocolo || {}).numero,
+          justificativa: just
+        }).then(function (r) {
+          if (btnC) { btnC.disabled = false; btnC.textContent = "Confirmar cancelamento"; }
+          if (!r.ok) {
+            alert("A SEFAZ não homologou o cancelamento.\n\ncStat " + (r.cStat || "-") +
+              " — " + (r.xMotivo || r.erro || "sem detalhe"));
+            return;
+          }
+          var canc = {
+            justificativa: just, dataHora: new Date().toISOString(),
+            protocoloNFe: (n.protocolo || {}).numero || "",
+            protocolo: r.nProt || "", cStat: r.cStat, xMotivo: r.xMotivo
+          };
+          DB.update("notas", n.id, {
+            status: "CANCELADA", cancelamento: canc, xmlCancelamento: r.procEvento
+          });
+          estado.cancelando = null;
+          Fiscal.baixar(Fiscal.nomeArquivo(n, "-canc"), r.procEvento);
+          alert("Cancelamento homologado pela SEFAZ.\nProtocolo do evento: " + (r.nProt || "-") +
+            "\nO XML do evento foi baixado.");
+          Router.refresh();
+        }, function (e) {
+          if (btnC) { btnC.disabled = false; btnC.textContent = "Confirmar cancelamento"; }
+          alert(Agente.ehErroOffline(e) ? Agente.mensagemOffline() : "Falha ao cancelar: " + e.message);
+        })["catch"](function (e) { console.error("Falha inesperada no cancelamento:", e); });
       });
       el.querySelector("#cancCancelar").addEventListener("click", function () {
         estado.cancelando = null;

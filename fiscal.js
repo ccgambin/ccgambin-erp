@@ -39,6 +39,19 @@
     var n = w.Utils ? Utils.numero(v) : Number(v) || 0;
     return n.toFixed(casas == null ? 2 : casas);
   }
+  /* Data/hora no formato exigido pela SEFAZ: AAAA-MM-DDThh:mm:ss-03:00.
+     O toISOString() devolve "...Z" (UTC) e a SEFAZ rejeita (dhEmi invalido). */
+  function dataHoraSefaz(d) {
+    d = d || new Date();
+    function p2(n) { return (n < 10 ? "0" : "") + n; }
+    var off = -d.getTimezoneOffset();
+    var sinal = off >= 0 ? "+" : "-";
+    off = Math.abs(off);
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) + "T" +
+      p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" + p2(d.getSeconds()) +
+      sinal + p2(Math.floor(off / 60)) + ":" + p2(off % 60);
+  }
+
   function ufCodigo(uf) { return UFS[String(uf || "").toUpperCase()] || "43"; }
 
   /* Dígito verificador da chave (módulo 11, pesos 2..9) */
@@ -103,7 +116,7 @@
       "<mod>" + pad(nota.modelo || "55", 2) + "</mod>" +
       "<serie>" + Number(dig(nota.serie) || 1) + "</serie>" +
       "<nNF>" + Number(dig(nota.numero) || 1) + "</nNF>" +
-      "<dhEmi>" + (nota.dhEmi || new Date().toISOString()) + "</dhEmi>" +
+      "<dhEmi>" + (nota.dhEmi || dataHoraSefaz()) + "</dhEmi>" +
       "<tpNF>" + (nota.tipoOperacao || "1") + "</tpNF>" +
       "<idDest>" + (String(de.uf || em.uf) === String(em.uf) ? "1" : "2") + "</idDest>" +
       "<cMunFG>" + pad(em.codigoMunicipio || "4300000", 7) + "</cMunFG>" +
@@ -112,7 +125,7 @@
       "<tpAmb>" + (nota.ambiente || "2") + "</tpAmb>" +
       "<finNFe>" + (nota.finalidade || "1") + "</finNFe>" +
       "<indFinal>" + (nota.consumidorFinal || "1") + "</indFinal>" +
-      "<indPres>1</indPres><procEmi>0</procEmi><verProc>CCGAMBIN-ERP-1.4</verProc>" +
+      "<indPres>1</indPres><procEmi>0</procEmi><verProc>CCGAMBIN-ERP-2.0</verProc>" +
       "</ide>";
 
     var emit = "<emit>" +
@@ -243,6 +256,16 @@
       "</infEvento></retEvento></procEventoNFe>";
   }
 
+  /* XML puro <NFe>...</NFe> para enviar ao agente assinar e transmitir.
+     Nao inclui nfeProc nem assinatura simulada. */
+  function xmlEnvio(nota) {
+    var limpa = Object.assign({}, nota, { assinatura: null, protocolo: null });
+    var completo = xmlNFe(limpa);
+    var i = completo.indexOf("<NFe ");
+    var j = completo.indexOf("</NFe>");
+    return i >= 0 && j > i ? completo.substring(i, j + 6) : completo;
+  }
+
   function nomeArquivo(nota, sufixo) {
     return nota.chave + (sufixo || "-nfe") + ".xml";
   }
@@ -312,7 +335,8 @@
     UFS: UFS, AMBIENTES: AMBIENTES, MODELOS: MODELOS, NATUREZAS: NATUREZAS,
     ufCodigo: ufCodigo, dvChave: dvChave, chaveAcesso: chaveAcesso, chaveFormatada: chaveFormatada,
     codigoNumerico: codigoNumerico, proximoNumero: proximoNumero,
-    xmlNFe: xmlNFe, xmlCancelamento: xmlCancelamento, nomeArquivo: nomeArquivo,
+    xmlNFe: xmlNFe, xmlEnvio: xmlEnvio, xmlCancelamento: xmlCancelamento, nomeArquivo: nomeArquivo,
+    dataHoraSefaz: dataHoraSefaz,
     baixar: baixar, zip: zip, texto: texto, digitos: dig, pad: pad
   };
 })(window);
